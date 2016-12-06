@@ -55,7 +55,7 @@ uint16_t crc16_compute(const uint8_t * p_data, uint32_t size, const uint16_t * p
 {
     uint32_t i;
     uint16_t crc = (p_crc == NULL) ? 0xffff : *p_crc;
-    
+
     for (i = 0; i < size; i++)
     {
         crc  = (unsigned char)(crc >> 8) | (crc << 8);
@@ -64,7 +64,7 @@ uint16_t crc16_compute(const uint8_t * p_data, uint32_t size, const uint16_t * p
         crc ^= (crc << 8) << 4;
         crc ^= ((crc & 0xff) << 4) << 1;
     }
-    
+
     return crc;
 }
 

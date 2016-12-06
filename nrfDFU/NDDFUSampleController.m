@@ -14,7 +14,7 @@ NSString *const kDeviceDiscoveryNotification = @"kDeviceDiscoveryNotification";
 NSString *const kDeviceDiscoveryDevice = @"kDeviceDiscoveryDevice";
 
 @interface NDDFUSampleController () {
-    
+
 }
 
 @end
@@ -32,6 +32,7 @@ NSString *const kDeviceDiscoveryDevice = @"kDeviceDiscoveryDevice";
     }
     _deviceToUpdate = nil;
     _deviceToUpdateUUID = nil;
+    _samd21ToUpdateUUID = nil;
     _devices = @[];
     return self;
 }
@@ -45,10 +46,14 @@ NSString *const kDeviceDiscoveryDevice = @"kDeviceDiscoveryDevice";
 - (void)deviceConnected:(NDDFUDevice *)device {
     // if we aren't in the "discovery" command line mode, the first time we connect to a device,
     //  we'll kick off the update process
-    if( _deviceToUpdate != nil && _deviceToUpdateUUID != nil ) {
+    if( _deviceToUpdate != nil && _deviceToUpdateUUID != nil && _deviceToUpdate.isConnected ) {
         _deviceToUpdateUUID = nil;
         [_deviceToUpdate startUpdateWithApplication:_firmware];
-    }    
+    }
+    if( _deviceToUpdate != nil && _samd21ToUpdateUUID != nil ) {
+        _samd21ToUpdateUUID = nil;
+        [_deviceToUpdate startSamd21UpdateWithApplication:_firmware];
+    }
 }
 
 - (void)deviceError:(NDDFUDevice *)device error:(NSError*)error {
@@ -89,7 +94,43 @@ NSString *const kDeviceDiscoveryDevice = @"kDeviceDiscoveryDevice";
     // start discovering devices
     [self initCentralManager];
     // allow for 5 second timeout finding the device
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(10 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if( _deviceToUpdate == nil ) {
+            NSError* error = nil;
+            if( uuid == nil ) {
+                error = [NSError errorWithDomain:@"DFU"
+                                            code:0
+                                        userInfo:@{NSLocalizedDescriptionKey: @"Unable to find device to update."}];
+            } else {
+                error = [NSError errorWithDomain:@"DFU"
+                                            code:0
+                                        userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"Unable to find device '%@'", [NSString stringWithFormat:@"Unable to find device '%@'", uuid]]}];
+            }
+            if( completed != nil ) {
+                _updateCompleteHandler = nil;
+                completed(error);
+            }
+        }
+    });
+    CFRunLoopRun();
+}
+
+- (void)updateSamd21WithApplication:(NSString *)applicationFileName uuid:(NSString *)uuid completed:(void (^)(NSError* error))completed {
+    NSError* error;
+    // load the firmware, only .bin files are supported
+    _firmware = [[NDDFUFirmware alloc] initWithApplicationURL:[NSURL fileURLWithPath:applicationFileName]];
+    if( ![_firmware loadFileData:&error] ) {
+        completed(error);
+        return;
+    }
+    // remember the block the user wants called back
+    _updateCompleteHandler = completed;
+    // remember the UUID of the device that the user is hoping we'll find
+    _samd21ToUpdateUUID = uuid;
+    // start discovering devices
+    [self initCentralManager];
+    // allow for 5 second timeout finding the device
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(10 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if( _deviceToUpdate == nil ) {
             NSError* error = nil;
             if( uuid == nil ) {
@@ -172,9 +213,10 @@ NSString *const kDeviceDiscoveryDevice = @"kDeviceDiscoveryDevice";
     // otherwise add this device
     NDDFUDevice* device = [self addDeviceForPeripheral:peripheral RSSI:[RSSI floatValue]];
     // if we haven't yet found the device the user asked for
-    if( _deviceToUpdateUUID != nil ) {
+    if( _deviceToUpdateUUID != nil || _samd21ToUpdateUUID != nil) {
         // check and see if this is it
-        if( [[device.peripheral.identifier.UUIDString uppercaseString] isEqualToString:[_deviceToUpdateUUID uppercaseString]] ) {
+        if( [[device.peripheral.identifier.UUIDString uppercaseString] isEqualToString:[_deviceToUpdateUUID uppercaseString]] ||
+            [[device.peripheral.identifier.UUIDString uppercaseString] isEqualToString:[_samd21ToUpdateUUID uppercaseString]]) {
             // remember it, and then connect to it
             _deviceToUpdate = device;
             [_centralManager connectPeripheral:device.peripheral
